@@ -207,48 +207,54 @@
         });
     }
 
-    // --- ИНИЦИАЛИЗАЦИЯ (ПРЯМАЯ ИНЪЕКЦИЯ) ---
+    // --- ИНИЦИАЛИЗАЦИЯ (MUTATION OBSERVER) ---
     function init() {
         if (window.myshows_started) return;
         window.myshows_started = true;
 
-        console.log('MyShows: Logic Loaded');
-        startTracking(); // Запускаем слежку за плеером
+        console.log('MyShows: Observer Started');
+        Lampa.Noty.show('Скрипт MyShows активен'); // ПРОВЕРКА ЗАГРУЗКИ
+        
+        startTracking();
 
-        // Внедрение кнопки (Твой метод)
-        Lampa.Listener.follow('settings', (e) => {
-            if (e.type === 'open' && e.name === 'main') {
-                setTimeout(() => {
-                    const body = e.body || $('.settings-main'); 
+        // Тяжелая артиллерия: следим за DOM, чтобы поймать отрисовку настроек
+        var observer = new MutationObserver(function(mutations) {
+            // Ищем контейнер настроек в любой модификации
+            var settings = $('.settings__content, .settings-main');
+            
+            if (settings.length > 0) {
+                // Если контейнер есть, а нашей кнопки нет
+                if ($('.selector[data-name="myshows"]').length === 0) {
                     
-                    if ($('.selector[data-name="myshows"]').length === 0) {
-                        const btn = $(`<div class="settings-item selector" data-name="myshows">
-                            <div class="settings-item__icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
-                            </div>
-                            <div class="settings-item__title">MyShows</div>
-                            <div class="settings-item__subtitle">Синхронизация</div>
-                        </div>`);
+                    const btn = $(`<div class="settings-item selector" data-name="myshows">
+                        <div class="settings-item__icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+                        </div>
+                        <div class="settings-item__title">MyShows</div>
+                        <div class="settings-item__subtitle">Синхронизация</div>
+                    </div>`);
 
-                        btn.on('hover:enter', () => {
-                            showMyShowsSettings();
-                        });
+                    btn.on('hover:enter', () => {
+                        showMyShowsSettings();
+                    });
 
-                        body.find('.scroll__content').append(btn);
-                        
-                        // Рефреш фокуса (важно для пульта)
-                        if (Lampa.Controller.enabled().name === 'settings') {
-                            // Lampa.Controller.toggle('settings'); // Иногда вызывает мерцание, но нужно для обновления навигации
-                        }
-                    }
-                }, 200); // Чуть увеличил тайм-аут для надежности
+                    // Вставляем ВНАЧАЛО списка, чтобы точно увидеть
+                    settings.find('.scroll__content').prepend(btn);
+                    console.log('MyShows: Button injected via Observer');
+                }
             }
+        });
+
+        // Начинаем следить за всем телом документа
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
         });
     }
 
     // Ожидание
     const wait = setInterval(() => {
-        if (typeof Lampa !== 'undefined' && Lampa.Settings && Lampa.Player) {
+        if (typeof Lampa !== 'undefined' && Lampa.Settings && Lampa.Player && window.$) {
             clearInterval(wait);
             init();
         }
