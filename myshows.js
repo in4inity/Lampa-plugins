@@ -1,100 +1,95 @@
 (function () {
     'use strict';
 
-    /**
-     * Специальная версия для Windows-приложения Lampa.
-     * Решает проблему "error undefined" путем изоляции контекста настроек.
-     */
-
-    const pluginName = 'MyShows';
-    const storagePrefix = 'myshows_';
-    const componentName = 'myshows_settings_component';
+    const pluginName = 'MyShows Fix';
+    const storagePrefix = 'ms_desktop_';
+    const pageId = 'myshows_settings';
+    const compId = 'myshows_component';
 
     function init() {
-        // Проверяем, не был ли плагин уже инициализирован (защита от двойного запуска)
-        if (window.MyShowsInitialized) return;
-        window.MyShowsInitialized = true;
+        // Проверяем, не был ли плагин уже запущен
+        if (window.MyShowsPluginRunning) return;
+        window.MyShowsPluginRunning = true;
 
-        // 1. Регистрация компонента (визуальная часть внутри настроек)
-        Lampa.Component.add(componentName, function (object) {
-            this.create = function () {
-                try {
-                    // Пытаемся получить шаблон настроек, если он уже создан
-                    this.build = Lampa.Settings.get('myshows_page') || $('<div><div class="settings-param"><div class="settings-param__name">Ошибка</div><div class="settings-param__value">Не удалось загрузить параметры</div></div></div>');
-                } catch (e) {
-                    console.error('MyShows Component Build Error:', e);
-                }
-            };
-
-            this.render = function () {
-                return this.build;
-            };
-        });
-
-        // 2. Создание страницы в реестре Lampa
         try {
-            Lampa.Settings.create('myshows_page', {
-                title: 'MyShows.me',
-                onBack: function () {
-                    Lampa.Settings.main('main');
-                }
-            });
+            // 1. Создаем страницу настроек (безопасно)
+            if (Lampa.Settings.create) {
+                Lampa.Settings.create(pageId, {
+                    title: 'MyShows (Desktop)',
+                    onBack: function () {
+                        Lampa.Settings.main('main');
+                    }
+                });
 
-            // 3. Наполнение страницы полями (используем безопасную проверку)
-            Lampa.Settings.add('myshows_page', [
-                {
-                    name: storagePrefix + 'user',
-                    type: 'input',
-                    default: '',
-                    placeholder: 'example@mail.ru',
-                    title: 'Логин / Email'
-                },
-                {
-                    name: storagePrefix + 'pass',
-                    type: 'input',
-                    default: '',
-                    placeholder: '******',
-                    title: 'Пароль'
-                },
-                {
-                    name: storagePrefix + 'status',
-                    type: 'static',
-                    title: 'Версия для Windows',
-                    content: 'Плагин адаптирован для десктопного приложения.'
-                }
-            ]);
+                // Добавляем поля ввода
+                Lampa.Settings.add(pageId, [
+                    {
+                        name: storagePrefix + 'user',
+                        type: 'input',
+                        default: '',
+                        placeholder: 'Логин',
+                        title: 'Ваш логин на MyShows'
+                    },
+                    {
+                        name: storagePrefix + 'pass',
+                        type: 'input',
+                        default: '',
+                        placeholder: 'Пароль',
+                        title: 'Ваш пароль'
+                    }
+                ]);
+            }
 
-            // 4. Добавление кнопки в основной раздел "Плагины"
-            // Используем тайм-аут, чтобы убедиться, что основной список настроек Lampa готов
-            setTimeout(function() {
-                if (Lampa.Settings.add) {
+            // 2. Регистрируем компонент, который будет открывать эти настройки
+            if (Lampa.Component && Lampa.Component.add) {
+                // Если компонент уже есть (после ошибки), Lampa может ругаться. 
+                // В новых версиях можно просто перезаписать.
+                Lampa.Component.add(compId, function (object) {
+                    this.create = function () {
+                        this.build = Lampa.Settings.get(pageId);
+                    };
+                    this.render = function () {
+                        return this.build;
+                    };
+                });
+            }
+
+            // 3. Добавляем кнопку в главное меню настроек
+            function injectButton() {
+                if (Lampa.Settings.main && Lampa.Settings.add) {
                     Lampa.Settings.add('main', [
                         {
-                            name: 'myshows_btn',
+                            name: 'myshows_entry_btn',
                             type: 'button',
                             title: 'MyShows',
-                            subtitle: 'Настройка синхронизации',
-                            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>',
+                            subtitle: 'Настройка аккаунта',
+                            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>',
                             onSelect: function () {
-                                Lampa.Settings.main(componentName);
+                                Lampa.Settings.main(compId);
                             }
                         }
                     ]);
                 }
-            }, 500);
+            }
 
-        } catch (err) {
-            console.error('MyShows Main Registration Error:', err);
+            // Пытаемся внедрить кнопку несколько раз, так как меню может перерисовываться
+            injectButton();
+            setTimeout(injectButton, 1000); 
+
+        } catch (e) {
+            console.error(pluginName + ' Fatal Error:', e);
         }
-
-        console.log(pluginName + ': Windows App Version Loaded');
     }
 
-    // В приложении на Windows ожидание может занять больше времени
-    var checkLampa = setInterval(function () {
+    // Цикл ожидания готовности Lampa
+    var attempts = 0;
+    var readyTimer = setInterval(function () {
+        attempts++;
         if (typeof Lampa !== 'undefined' && Lampa.Settings && Lampa.Component) {
-            clearInterval(checkLampa);
+            clearInterval(readyTimer);
             init();
         }
-    }, 300);
+        if (attempts > 50) clearInterval(readyTimer); // Прекращаем через 10 секунд
+    }, 200);
+
 })();
