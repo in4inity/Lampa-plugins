@@ -1,234 +1,174 @@
 (function () {
     'use strict';
 
-    // --- КОНФИГУРАЦИЯ (ИЗ ОРИГИНАЛА) ---
+    // Конфигурация и прокси
+    const PROXY_URL = 'https://numparser.igorek1986.ru/myshows/auth';
     const API_URL = 'https://api.myshows.me/v3/rpc/';
-    const PROXY_URL = 'https://numparser.igorek1986.ru/myshows/auth'; // Используем прокси Игоря для обхода CORS
     const STORAGE_KEY = 'myshows_desktop_data';
 
-    // Состояние
     let state = {
         token: Lampa.Storage.get(STORAGE_KEY, {}).token || '',
         login: Lampa.Storage.get(STORAGE_KEY, {}).login || '',
         current_video: null
     };
 
-    // --- СЕТЕВОЙ СЛОЙ (КАК У ИГОРЯ) ---
-    async function request(method, params = {}) {
-        if (!state.token && method !== 'auth') return null;
+    // --- РЕГИСТРАЦИЯ КОМПОНЕНТА (Как у Игоря) ---
+    function Component(object) {
+        var network = new Lampa.Reguest();
+        var scroll = new Lampa.Scroll({ mask: true, over: true });
+        var items = [];
+        var active = 0;
 
-        try {
-            let headers = { 'Content-Type': 'application/json' };
-            if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        this.create = function () {
+            this.activity.loader(true);
+            
+            // Отрисовка полей
+            var html = $('<div class="settings-list"></div>');
+            
+            var field_login = $(`
+                <div class="settings-item selector">
+                    <div class="settings-item__title">Логин (Email)</div>
+                    <div class="settings-item__subtitle">${state.login || 'Не указан'}</div>
+                </div>
+            `);
 
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    method: method,
-                    params: params,
-                    id: 1
-                })
+            var field_pass = $(`
+                <div class="settings-item selector">
+                    <div class="settings-item__title">Пароль</div>
+                    <div class="settings-item__subtitle">Нажмите, чтобы ввести пароль и войти</div>
+                </div>
+            `);
+
+            var status_info = $(`
+                <div class="settings-item">
+                    <div class="settings-item__title">Статус</div>
+                    <div class="settings-item__subtitle">${state.token ? 'Авторизован' : 'Требуется вход'}</div>
+                </div>
+            `);
+
+            field_login.on('hover:enter', () => {
+                Lampa.Input.edit({
+                    value: state.login,
+                    title: 'Введите Email на MyShows'
+                }, (value) => {
+                    if (value) {
+                        state.login = value;
+                        field_login.find('.settings-item__subtitle').text(value);
+                    }
+                });
             });
-            const data = await response.json();
+
+            field_pass.on('hover:enter', () => {
+                Lampa.Input.edit({
+                    value: '',
+                    title: 'Введите пароль'
+                }, (value) => {
+                    if (value && state.login) {
+                        Lampa.Noty.show('Авторизация...');
+                        $.ajax({
+                            url: PROXY_URL,
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({ login: state.login, password: value }),
+                            success: function (data) {
+                                if (data && data.token) {
+                                    state.token = data.token;
+                                    Lampa.Storage.set(STORAGE_KEY, { login: state.login, token: data.token });
+                                    Lampa.Noty.show('Успешно подключено!');
+                                    status_info.find('.settings-item__subtitle').text('Авторизован');
+                                } else {
+                                    Lampa.Noty.show('Ошибка: Проверьте данные');
+                                }
+                            },
+                            error: function() { Lampa.Noty.show('Ошибка сети'); }
+                        });
+                    } else {
+                        Lampa.Noty.show('Сначала введите логин');
+                    }
+                });
+            });
+
+            html.append(status_info);
+            html.append(field_login);
+            html.append(field_pass);
+
+            scroll.append(html);
+            this.activity.loader(false);
+            return scroll.render();
+        };
+
+        this.pause = function () {};
+        this.stop = function () {};
+        this.render = function () { return scroll.render(); };
+        this.destroy = function () {
+            network.clear();
+            scroll.destroy();
+            html.remove();
+        };
+    }
+
+    // --- ЛОГИКА API ---
+    async function request(method, params = {}) {
+        if (!state.token) return null;
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + state.token
+                },
+                body: JSON.stringify({ jsonrpc: '2.0', method: method, params: params, id: 1 })
+            });
+            const data = await res.json();
             return data.result;
-        } catch (e) {
-            console.error('MyShows RPC Error:', e);
-            return null;
-        }
+        } catch (e) { return null; }
     }
 
-    // --- ЛОГИКА АВТОРИЗАЦИИ (ЧЕРЕЗ ПРОКСИ) ---
-    function doAuth(login, password) {
-        Lampa.Noty.show('MyShows: Авторизация...');
-        
-        // Используем $.ajax для совместимости с Lampa Network
-        $.ajax({
-            url: PROXY_URL,
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify({ login: login, password: password }),
-            success: function (data) {
-                if (data && data.token) {
-                    state.token = data.token;
-                    state.login = login;
-                    
-                    Lampa.Storage.set(STORAGE_KEY, {
-                        login: login,
-                        token: data.token
-                    });
-                    
-                    Lampa.Noty.show('MyShows: Успешный вход!');
-                    
-                    // Обновляем статус в меню (перерисовываем настройки)
-                    Lampa.Settings.update(); 
-                } else {
-                    Lampa.Noty.show('MyShows: Ошибка (Нет токена)');
-                }
-            },
-            error: function (xhr) {
-                Lampa.Noty.show('MyShows: Ошибка сети/пароля');
-            }
-        });
-    }
-
-    // --- БИЗНЕС-ЛОГИКА: СОПОСТАВЛЕНИЕ (ИЗ ПЛАГИНА ИГОРЯ) ---
-    async function findShowId(card) {
-        // 1. Пробуем по IMDB (самый надежный метод Игоря)
-        if (card.imdb_id) {
-            let imdbClean = card.imdb_id.replace('tt', '');
-            let res = await request('shows.GetByExternalId', { id: parseInt(imdbClean), source: 'imdb' });
-            if (res && res.id) return res.id;
-        }
-
-        // 2. Пробуем по Kinopoisk
-        if (card.kp_id) {
-            let res = await request('shows.GetByExternalId', { id: parseInt(card.kp_id), source: 'kinopoisk' });
-            if (res && res.id) return res.id;
-        }
-
-        // 3. Фолбек: Поиск по названию (как у Игоря для торрентов)
-        let query = card.original_title || card.original_name || card.title;
-        if (query) {
-            let res = await request('shows.Search', { query: query });
-            if (res && res.length > 0) return res[0].id;
-        }
-
-        return null;
-    }
-
-    async function checkEpisode(card, season, episode) {
-        if (!state.token) return;
-
-        let showId = await findShowId(card);
-        if (!showId) return console.log('MyShows: Шоу не найдено');
-
-        // Получаем список эпизодов
-        let episodes = await request('shows.GetEpisodes', { showId: showId });
-        if (episodes) {
-            let target = episodes.find(e => e.season === parseInt(season) && e.episode === parseInt(episode));
-            if (target) {
-                await request('manage.CheckEpisode', { id: target.id, rating: 0 });
-                Lampa.Noty.show('MyShows: Отмечено ' + season + 'x' + episode);
-            }
-        }
-    }
-
-    // --- СЛЕЖКА ЗА ПЛЕЕРОМ (LAMPA API) ---
-    function startTracking() {
-        Lampa.Player.listener.follow('time', function (data) {
-            if (!state.token) return;
-
-            // Логика 85% прогресса (как в оригинале)
-            let progress = (data.time / data.duration) * 100;
-            
-            // Защита от дребезга (чтобы не отправлять 100 запросов)
-            let uniqKey = data.item.id + '_' + data.item.season + '_' + data.item.episode;
-            
-            if (progress > 85 && state.current_video !== uniqKey) {
-                state.current_video = uniqKey;
-                
-                // Проверяем, что это сериал
-                if (data.item.season && data.item.episode) {
-                    checkEpisode(data.item, data.item.season, data.item.episode);
+    async function markEpisode(data) {
+        if (!state.token || !data.item.season || !data.item.episode) return;
+        let query = data.item.original_title || data.item.title;
+        let shows = await request('shows.Search', { query: query });
+        if (shows && shows.length > 0) {
+            let episodes = await request('shows.GetEpisodes', { showId: shows[0].id });
+            if (episodes) {
+                let ep = episodes.find(e => e.season == data.item.season && e.episode == data.item.episode);
+                if (ep) {
+                    await request('manage.CheckEpisode', { id: ep.id });
+                    Lampa.Noty.show('MyShows: Отмечено ' + data.item.season + 'x' + data.item.episode);
                 }
             }
-        });
+        }
     }
 
-    // --- UI: НАСТРОЙКИ (ИСПРАВЛЕННАЯ СВЯЗКА) ---
-    function showMyShowsSettings() {
-        // Создаем страницу в реестре настроек Lampa
-        Lampa.Settings.create('myshows_page', {
-            title: 'MyShows Pro',
-            onBack: function() {
-                Lampa.Settings.main('main');
-            }
-        });
-
-        // Наполняем полями
-        Lampa.Settings.add('myshows_page', [
-            {
-                title: 'Статус',
-                name: 'ms_status',
-                type: 'static',
-                content: state.token ? '<span style="color:#4caf50">Авторизован</span>' : 'Необходим вход'
-            },
-            {
-                title: 'Логин',
-                name: 'ms_login',
-                type: 'input',
-                value: state.login,
-                placeholder: 'Email',
-                onChange: (v) => { state.login = v; }
-            },
-            {
-                title: 'Пароль',
-                name: 'ms_password',
-                type: 'input',
-                value: '',
-                placeholder: 'Пароль',
-                onChange: (v) => { 
-                    if (state.login && v) doAuth(state.login, v);
-                }
-            }
-        ]);
-
-        // Открываем созданную страницу
-        Lampa.Settings.main('myshows_page');
-    }
-
-    // --- ИНИЦИАЛИЗАЦИЯ (MUTATION OBSERVER) ---
+    // --- ИНИЦИАЛИЗАЦИЯ (Метод Игоря) ---
     function init() {
-        if (window.myshows_started) return;
-        window.myshows_started = true;
+        if (window.myshows_loaded) return;
+        window.myshows_loaded = true;
 
-        console.log('MyShows: Observer Started');
-        Lampa.Noty.show('Скрипт MyShows активен'); // ПРОВЕРКА ЗАГРУЗКИ
-        
-        startTracking();
+        // Регистрируем компонент страницы
+        Lampa.Component.add('myshows_page', Component);
 
-        // Тяжелая артиллерия: следим за DOM, чтобы поймать отрисовку настроек
-        var observer = new MutationObserver(function(mutations) {
-            // Ищем контейнер настроек в любой модификации
-            var settings = $('.settings__content, .settings-main');
-            
-            if (settings.length > 0) {
-                // Если контейнер есть, а нашей кнопки нет
-                if ($('.selector[data-name="myshows"]').length === 0) {
-                    
-                    const btn = $(`<div class="settings-item selector" data-name="myshows">
-                        <div class="settings-item__icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
-                        </div>
-                        <div class="settings-item__title">MyShows</div>
-                        <div class="settings-item__subtitle">Синхронизация</div>
-                    </div>`);
-
-                    btn.on('hover:enter', () => {
-                        showMyShowsSettings();
-                    });
-
-                    // Вставляем ВНАЧАЛО списка, чтобы точно увидеть
-                    settings.find('.scroll__content').prepend(btn);
-                    console.log('MyShows: Button injected via Observer');
-                }
-            }
+        // Добавляем пункт в настройки (копируем структуру Игоря)
+        Lampa.Settings.create({
+            title: 'MyShows Pro',
+            icon: '<svg height="36" viewBox="0 0 24 24" width="36" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h24v24H0z" fill="none"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" fill="white"/></svg>',
+            component: 'myshows_page',
+            search: false
         });
 
-        // Начинаем следить за всем телом документа
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
+        // Следим за плеером
+        Lampa.Player.listener.follow('time', function (data) {
+            let progress = (data.time / data.duration) * 100;
+            let key = data.item.id + '_' + data.item.season + '_' + data.item.episode;
+            if (progress > 85 && state.current_video !== key) {
+                state.current_video = key;
+                markEpisode(data);
+            }
         });
     }
 
-    // Ожидание
-    const wait = setInterval(() => {
-        if (typeof Lampa !== 'undefined' && Lampa.Settings && Lampa.Player && window.$) {
-            clearInterval(wait);
-            init();
-        }
-    }, 200);
+    if (window.appready) init();
+    else Lampa.Listener.follow('app', function (e) {
+        if (e.type == 'ready') init();
+    });
 })();
