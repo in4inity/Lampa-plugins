@@ -2,48 +2,28 @@
     'use strict';
 
     /**
-     * Плагин MyShows для Lampa с глубокой интеграцией в настройки.
-     * Мы используем стандартный механизм Lampa.Settings для создания интерфейса.
+     * Исправленная версия плагина MyShows.
+     * Добавлена регистрация компонента, чтобы избежать ошибки при клике.
      */
 
     const pluginName = 'MyShows';
     const storageKeyPrefix = 'myshows_';
 
     function init() {
-        // --- 1. Регистрация нового раздела в настройках ---
-        Lampa.Settings.listener.follow('open', function (e) {
-            // Ждем открытия главного меню настроек
-            if (e.name === 'main') {
-                const settingsMenu = e.body;
-                
-                // Проверяем, не добавили ли мы уже кнопку (чтобы не дублировать)
-                if (settingsMenu.find('[data-component="myshows_settings"]').length === 0) {
-                    const button = $(`
-                        <div class="settings-folder selector" data-component="myshows_settings">
-                            <div class="settings-folder__icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" fill="currentColor"/>
-                                </svg>
-                            </div>
-                            <div class="settings-folder__name">MyShows</div>
-                        </div>
-                    `);
+        // --- 1. Регистрируем компонент в системе Lampa ---
+        // Без этого вызова Lampa не знает, ЧТО рисовать, когда мы жмем на пункт в меню
+        Lampa.Component.add('myshows_settings', function (object) {
+            this.create = function () {
+                // Создаем контейнер для наших настроек
+                this.build = Lampa.Settings.get('myshows_settings');
+            };
 
-                    button.on('hover:enter', function () {
-                        // При нажатии открываем наш кастомный компонент настроек
-                        Lampa.Settings.main('myshows_settings');
-                    });
-
-                    // Вставляем перед разделом "Плагины"
-                    settingsMenu.find('[data-component="plugins"]').before(button);
-                    
-                    // Обновляем навигацию Lampa, чтобы новая кнопка стала кликабельной
-                    Lampa.Controller.update();
-                }
-            }
+            this.render = function () {
+                return this.build;
+            };
         });
 
-        // --- 2. Создание структуры страницы настроек ---
+        // --- 2. Создаем структуру страницы настроек ---
         Lampa.Settings.create('myshows_settings', {
             title: 'MyShows',
             onBack: function () {
@@ -51,7 +31,7 @@
             }
         });
 
-        // Добавляем поля ввода и кнопки
+        // --- 3. Наполняем полями ---
         Lampa.Settings.add('myshows_settings', [
             {
                 name: storageKeyPrefix + 'login',
@@ -78,41 +58,56 @@
                 type: 'button',
                 title: 'Выполнить вход',
                 onSelect: function () {
-                    performAuth();
+                    Lampa.Noty.show('Функция входа в разработке');
                 }
             }
         ]);
 
-        console.log(pluginName + ': Интеграция в настройки завершена');
+        // --- 4. Внедряем кнопку в главное меню настроек ---
+        Lampa.Settings.listener.follow('open', function (e) {
+            if (e.name === 'main') {
+                // Используем setTimeout, чтобы DOM успел отрисоваться
+                setTimeout(function() {
+                    const settingsMenu = e.body;
+                    if (settingsMenu.find('[data-component="myshows_settings"]').length === 0) {
+                        const button = $(`
+                            <div class="settings-folder selector" data-component="myshows_settings">
+                                <div class="settings-folder__icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM12 17l-5-5h10l-5 5z" />
+                                    </svg>
+                                </div>
+                                <div class="settings-folder__name">MyShows</div>
+                            </div>
+                        `);
+
+                        button.on('hover:enter', function () {
+                            Lampa.Settings.main('myshows_settings');
+                        });
+
+                        settingsMenu.find('[data-component="plugins"]').before(button);
+                        Lampa.Controller.update();
+                    }
+                }, 10);
+            }
+        });
+
+        console.log(pluginName + ': Ready');
     }
 
-    /**
-     * Логика авторизации
-     */
-    function performAuth() {
-        const login = Lampa.Storage.get(storageKeyPrefix + 'login');
-        const password = Lampa.Storage.get(storageKeyPrefix + 'password');
-
-        if (!login || !password) {
-            Lampa.Noty.show('Введите логин и пароль в настройках!');
-            return;
-        }
-
-        Lampa.Noty.show('Пробуем войти в MyShows...');
-        
-        // Тут должна быть твоя логика API запроса к MyShows
-        // После успеха не забудь обновить статус в меню или перезагрузить страницу
-        console.log('Попытка входа для:', login);
-    }
-
-    // Ждем готовности Lampa
-    if (window.Lampa) {
+    // Запуск с проверкой наличия Lampa и jQuery ($)
+    if (window.Lampa && window.$) {
         init();
     } else {
-        var waitLampa = setInterval(function () {
-            if (window.Lampa) {
-                clearInterval(waitLampa);
+        let attempts = 0;
+        const wait = setInterval(function () {
+            attempts++;
+            if (window.Lampa && window.$) {
+                clearInterval(wait);
                 init();
+            } else if (attempts > 50) {
+                clearInterval(wait);
+                console.error('MyShows: Lampa not found');
             }
         }, 100);
     }
