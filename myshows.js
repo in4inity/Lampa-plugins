@@ -2,112 +2,118 @@
     'use strict';
 
     /**
-     * MyShows Pro for Lampa
-     * Смена стратегии: Полный функционал API и глубокая интеграция.
+     * Плагин MyShows для Lampa с глубокой интеграцией в настройки.
+     * Мы используем стандартный механизм Lampa.Settings для создания интерфейса.
      */
 
-    const pluginId = 'myshows_pro_v2';
-    const pluginName = 'MyShows Pro';
-    const apiHost = 'https://api.myshows.me/v2';
-    
-    // Хранилище данных в памяти (можно заменить на Firestore позже)
-    let userData = {
-        token: localStorage.getItem('myshows_token'),
-        refresh_token: localStorage.getItem('myshows_refresh_token')
-    };
+    const pluginName = 'MyShows';
+    const storageKeyPrefix = 'myshows_';
 
-    /**
-     * Основной компонент интерфейса
-     */
-    Lampa.Component.add(pluginId, function (object) {
-        let network = new Lampa.Reguest();
-        let scroll = new Lampa.Scroll({mask: true, over: true});
-        let items = [];
-        let html = $('<div class="myshows-root"></div>');
+    function init() {
+        // --- 1. Регистрация нового раздела в настройках ---
+        Lampa.Settings.listener.follow('open', function (e) {
+            // Ждем открытия главного меню настроек
+            if (e.name === 'main') {
+                const settingsMenu = e.body;
+                
+                // Проверяем, не добавили ли мы уже кнопку (чтобы не дублировать)
+                if (settingsMenu.find('[data-component="myshows_settings"]').length === 0) {
+                    const button = $(`
+                        <div class="settings-folder selector" data-component="myshows_settings">
+                            <div class="settings-folder__icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" fill="currentColor"/>
+                                </svg>
+                            </div>
+                            <div class="settings-folder__name">MyShows</div>
+                        </div>
+                    `);
 
-        this.create = function () {
-            this.activity.loader(true);
-            
-            if (!userData.token) {
-                this.renderLogin();
-            } else {
-                this.loadShows();
+                    button.on('hover:enter', function () {
+                        // При нажатии открываем наш кастомный компонент настроек
+                        Lampa.Settings.main('myshows_settings');
+                    });
+
+                    // Вставляем перед разделом "Плагины"
+                    settingsMenu.find('[data-component="plugins"]').before(button);
+                    
+                    // Обновляем навигацию Lampa, чтобы новая кнопка стала кликабельной
+                    Lampa.Controller.update();
+                }
             }
-        };
+        });
 
-        // Отрисовка экрана входа
-        this.renderLogin = function () {
-            let _this = this;
-            let loginHtml = $(`
-                <div class="myshows-login" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center;">
-                    <img src="https://myshows.me/shared/img/fe/logo-main.svg" style="width: 200px; margin-bottom: 20px;" onerror="this.src='https://via.placeholder.com/200x50?text=MyShows'"/>
-                    <h2 style="margin-bottom: 30px;">Синхронизируйте свои сериалы</h2>
-                    <div class="selector button" style="padding: 15px 40px; background: #ea3e3e; border-radius: 8px; font-weight: bold; cursor: pointer;">
-                        Авторизоваться через код
-                    </div>
-                    <p style="margin-top: 20px; color: #888; font-size: 0.9em;">Плагин запросит код устройства для доступа к вашему профилю</p>
-                </div>
-            `);
+        // --- 2. Создание структуры страницы настроек ---
+        Lampa.Settings.create('myshows_settings', {
+            title: 'MyShows',
+            onBack: function () {
+                Lampa.Settings.main('main');
+            }
+        });
 
-            loginHtml.find('.button').on('hover:enter', () => {
-                _this.startDeviceAuth();
-            });
+        // Добавляем поля ввода и кнопки
+        Lampa.Settings.add('myshows_settings', [
+            {
+                name: storageKeyPrefix + 'login',
+                type: 'input',
+                default: '',
+                placeholder: 'Email или логин',
+                title: 'Логин на MyShows'
+            },
+            {
+                name: storageKeyPrefix + 'password',
+                type: 'input',
+                default: '',
+                placeholder: 'Ваш пароль',
+                title: 'Пароль'
+            },
+            {
+                name: 'myshows_status',
+                type: 'static',
+                title: 'Статус',
+                content: Lampa.Storage.get(storageKeyPrefix + 'token') ? '<span style="color: #4caf50">Авторизован</span>' : 'Необходим вход'
+            },
+            {
+                name: 'myshows_auth_btn',
+                type: 'button',
+                title: 'Выполнить вход',
+                onSelect: function () {
+                    performAuth();
+                }
+            }
+        ]);
 
-            scroll.append(loginHtml);
-            this.activity.loader(false);
-            html.append(scroll.render());
-        };
-
-        // Заглушка логики авторизации (Device Flow)
-        this.startDeviceAuth = function () {
-            Lampa.Noty.show("Функция авторизации в разработке. Токен не найден.");
-            console.log("Starting Device Auth Flow...");
-        };
-
-        // Загрузка сериалов пользователя
-        this.loadShows = function () {
-            // Здесь будет fetch к api.myshows.me/v2/user/shows/
-            Lampa.Noty.show("Загрузка ваших списков...");
-            this.activity.loader(false);
-        };
-
-        this.render = function () { return html; };
-        this.pause = function () {};
-        this.stop = function () {};
-        this.destroy = function () {
-            network.clear();
-            scroll.destroy();
-            html.remove();
-        };
-    });
-
-    /**
-     * Инъекция в боковое меню
-     */
-    function injectToMenu() {
-        const menu = Lampa.Menu.list();
-        if (!menu.some(i => i.id === pluginId)) {
-            const index = menu.findIndex(i => i.id === 'settings') || menu.length;
-            menu.splice(index, 0, {
-                title: 'MyShows Pro',
-                id: pluginId,
-                icon: `<svg height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 12l-4-4h8l-4 4z" fill="#fff"/></svg>`,
-                type: 'submenu'
-            });
-            if (Lampa.Menu.update) Lampa.Menu.update();
-        }
+        console.log(pluginName + ': Интеграция в настройки завершена');
     }
 
-    // Регистрация плагина
-    Lampa.Plugins.add({
-        id: pluginId,
-        name: pluginName,
-        description: 'Синхронизация сериалов с MyShows.me',
-        onReady: injectToMenu
-    });
+    /**
+     * Логика авторизации
+     */
+    function performAuth() {
+        const login = Lampa.Storage.get(storageKeyPrefix + 'login');
+        const password = Lampa.Storage.get(storageKeyPrefix + 'password');
 
-    // Форсированный запуск
-    if (window.appready) injectToMenu();
-    else Lampa.Listener.follow('app', e => { if (e.type === 'ready') injectToMenu(); });
+        if (!login || !password) {
+            Lampa.Noty.show('Введите логин и пароль в настройках!');
+            return;
+        }
 
+        Lampa.Noty.show('Пробуем войти в MyShows...');
+        
+        // Тут должна быть твоя логика API запроса к MyShows
+        // После успеха не забудь обновить статус в меню или перезагрузить страницу
+        console.log('Попытка входа для:', login);
+    }
+
+    // Ждем готовности Lampa
+    if (window.Lampa) {
+        init();
+    } else {
+        var waitLampa = setInterval(function () {
+            if (window.Lampa) {
+                clearInterval(waitLampa);
+                init();
+            }
+        }, 100);
+    }
 })();
